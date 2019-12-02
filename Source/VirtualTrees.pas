@@ -30550,7 +30550,7 @@ var
   R,                           // the area of an entire node in its local coordinate
   TargetRect,                  // the area of a node (part) in the target canvas
   SelectionRect,               // ordered rectangle used for drawing the selection focus rect
-  ClipRect: TRect;             // area to which the canvas will be clipped when painting a node's content
+  ClipRct: TRect;              // area to which the canvas will be clipped when painting a node's content
   NextColumn: TColumnIndex;
   BaseOffset: Integer;         // top position of the top node to draw given in absolute tree coordinates
   NodeBitmap: TBitmap;         // small buffer to draw flicker free
@@ -30571,8 +30571,9 @@ var
   CellIsTouchingClientRight: Boolean;
   CellIsInLastColumn: Boolean;
   ColumnIsFixed: Boolean;
-
 begin
+  if (Window.Right<=0) or (Window.Bottom<=0)
+    then EXIT; // No part of the tree is visible. There's no point in going on.
   {$ifdef DEBUG_VTV}Logger.EnterMethod([lcPaint],'PaintTree');{$endif}
   {$ifdef DEBUG_VTV}Logger.Send([lcPaint, lcHeaderOffset],'Window',Window);{$endif}
   {$ifdef DEBUG_VTV}Logger.Send([lcPaint, lcHeaderOffset],'Target',Target);{$endif}
@@ -30599,7 +30600,10 @@ begin
       // Prepare paint info structure and lock the back bitmap canvas to avoid that it gets freed on the way.
       FillChar(PaintInfo, SizeOf(PaintInfo), 0);
 
-      PaintWidth := Window.Right - Window.Left;
+      if 0<Window.Left then
+        PaintWidth := Window.Right-Window.Left
+      else
+        PaintWidth := Window.Right;
 
       if not (poUnbuffered in PaintOptions) then
       begin
@@ -30687,6 +30691,7 @@ begin
         // This is needed for column based background colors.
         FirstColumn := InvalidColumn;
 
+
         if Assigned(PaintInfo.Node) then
         begin
           ButtonX := Round((Integer(FIndent) - FPlusBM.Width) / 2) + 1;
@@ -30726,25 +30731,42 @@ begin
             // which are children of selected nodes.
             if (SelectLevel > 0) or not (poSelectedOnly in PaintOptions) then
             begin
+
               if not (poUnbuffered in PaintOptions) then
               begin
+                with ClipRct do
+                begin
+                  if Window.Left<0 then Left := 0 else Left := Window.Left;
+                  Right := Left + PaintWidth;
+                  Top := Max(TargetRect.Top, Target.Y) - TargetRect.Top;
+                  Bottom := Min(PaintInfo.Node.NodeHeight, MaximumBottom - TargetRect.Top);
+                end;
+
                 // Adjust height of temporary node bitmap.
                 with NodeBitmap do
                 begin
                   if Height <> PaintInfo.Node.NodeHeight then
                   begin
-                    // Avoid that the VCL copies the bitmap while changing its height.                    
+                    // Avoid that the VCL copies the bitmap while changing its height.
                     Height := PaintInfo.Node.NodeHeight;
-                    {$ifdef UseSetCanvasOrigin}
-                    SetCanvasOrigin(Canvas, Window.Left, 0);
-                    {$else}
-                    SetWindowOrgEx(Canvas.Handle, Window.Left, 0, nil);
-                    {$endif}
                   end;
+                  {$ifdef UseSetCanvasOrigin}
+                  SetCanvasOrigin(Canvas, ClipRct.Left, 0);
+                  {$else}
+                  SetWindowOrgEx(Canvas.Handle, ClipRct.Left, 0, nil);
+                  {$endif}
                 end;
               end
               else
               begin
+                with ClipRct do
+                begin
+                  Left :=max(0,Window.Left);
+                  Right :=Window.Right;
+                  Top := Max(TargetRect.Top, Target.Y) - TargetRect.Top;
+                  Bottom := Min(TargetRect.Bottom, MaximumBottom) - TargetRect.Top;
+                end;
+
                 // Set the origin of the canvas' brush. This depends on the node heights.
                 //todo: see if is necessary. According to docs is only necessary when HALFTONE is set
                 {$ifdef UseSetCanvasOrigin}
@@ -30752,8 +30774,7 @@ begin
                 {$else}
                 SetWindowOrgEx(PaintInfo.Canvas.Handle, -TargetRect.Left + Window.Left, -TargetRect.Top, nil);
                 {$endif}
-                ClipCanvas(PaintInfo.Canvas, Rect(TargetRect.Left, TargetRect.Top, TargetRect.Right,
-                                                  Min(TargetRect.Bottom, MaximumBottom)));
+                ClipCanvas(PaintInfo.Canvas, ClipRct);
               end;
 
               // Set the origin of the canvas' brush. This depends on the node heights.
@@ -30764,7 +30785,7 @@ begin
 
               CurrentNodeHeight := PaintInfo.Node.NodeHeight;
               R.Bottom := CurrentNodeHeight;
-              
+
               CalculateVerticalAlignments(ShowImages, ShowStateImages, PaintInfo.Node, VAlign, ButtonY);
 
               // Let application decide whether the node should normally be drawn or by the application itself.
@@ -30774,8 +30795,7 @@ begin
                 PaintInfo.PaintOptions := PaintOptions;
                 {$ifdef DEBUG_VTV}Logger.Watch([lcPaintDetails],'Brush.Color',PaintInfo.Canvas.Brush.Color);{$endif}
                 // The node background can contain a single color, a bitmap or can be drawn by the application.
-                ClearNodeBackground(PaintInfo, UseBackground, True, Rect(Window.Left, TargetRect.Top, Window.Right,
-                  TargetRect.Bottom));
+                ClearNodeBackground(PaintInfo, UseBackground, True, Rect(ClipRct.Left, TargetRect.Top, ClipRct.Right, TargetRect.Bottom));
                 {$ifdef DEBUG_VTV}Logger.SendBitmap([lcPaintBitmap],'After Clear BackGround',NodeBitmap);{$endif}
                 {$ifdef DEBUG_VTV}Logger.Watch([lcPaintDetails],'Brush.Color',PaintInfo.Canvas.Brush.Color);{$endif}
                 // Prepare column, position and node clipping rectangle.
@@ -30880,15 +30900,18 @@ begin
 
                           if UseColumns then
                           begin
-                            ClipRect := CellRect;
+                            // `ClipRct.Top` and `ClipRct.Bottom` was calculated above
                             if poUnbuffered in PaintOptions then
                             begin
-                              ClipRect.Left := Max(ClipRect.Left, Window.Left);
-                              ClipRect.Right := Min(ClipRect.Right, Window.Right);
-                              ClipRect.Top := Max(ClipRect.Top, Window.Top - (BaseOffset - CurrentNodeHeight));
-                              ClipRect.Bottom := ClipRect.Bottom - Max(TargetRect.Bottom - MaximumBottom, 0);
+                              ClipRct.Left := Max(CellRect.Left, Window.Left);
+                              ClipRct.Right := Min(CellRect.Right, Window.Right);
+                            end
+                            else
+                            begin
+                              ClipRct.Left := CellRect.Left;
+                              ClipRct.Right := CellRect.Right;
                             end;
-                            ClipCanvas(Canvas, ClipRect);
+                            ClipCanvas(Canvas, ClipRct);
                           end;
 
                           // Paint the horizontal grid line.
@@ -30952,6 +30975,7 @@ begin
                               end;
                             end;
                           end;
+
 
                           // Prepare background and focus rect for the current cell.
                           PrepareCell(PaintInfo, Window.Left, PaintWidth);
@@ -31054,11 +31078,29 @@ begin
                 {$ifdef DEBUG_VTV}Logger.SendIf([lcPaintDetails],'YCorrect ' + IntToStr(YCorrect), YCorrect > 0);{$endif}
                 {$endif}
                 // Put the constructed node image onto the target canvas.
-                if not (poUnbuffered in PaintOptions) then
-                  with TWithSafeRect(TargetRect), NodeBitmap do
-                    BitBlt(TargetCanvas.Handle, Left,
-                     Top {$ifdef ManualClipNeeded} + YCorrect{$endif}, Width, Height, Canvas.Handle, Window.Left,
-                     {$ifdef ManualClipNeeded}YCorrect{$else}0{$endif}, SRCCOPY);
+                if not (poUnbuffered in PaintOptions) then  begin
+                  if Window.Left<0
+                  then begin
+                    ClipRct.Left:= Target.X - Window.Left;
+                    ClipRct.Right := 0;
+                  end
+                  else begin
+                    ClipRct.Left := Target.X;
+                    ClipRct.Right := Window.Left;
+                  end;
+                  BitBlt( // target for PAINT
+                          TargetCanvas.Handle,
+                          ClipRct.Left,
+                          TargetRect.Top + ClipRct.Top {$ifdef ManualClipNeeded} + YCorrect{$endif},
+                          PaintWidth,
+                          ClipRct.Height,
+                          // source
+                          NodeBitmap.Canvas.Handle,
+                          ClipRct.Right,
+                          ClipRct.Top {$ifdef ManualClipNeeded} + YCorrect{$endif},
+                          // mode
+                          SRCCOPY);
+                end;
               end;
             end;
 
