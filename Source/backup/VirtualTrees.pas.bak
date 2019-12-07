@@ -31225,10 +31225,10 @@ begin
                     // Check wether this column needs to be painted at all.
                     if (Window.Left<MaxRight) then
                     begin
-
+                      //
                       R.Left :=max(r.Left,Window.Left);
                       R.Right:=min(r.Right,Window.Right);
-
+                      //
                       if (R.Right < Window.Right) and
                          (poGridLines in PaintOptions) and
                          (toFullVertGridLines in FOptions.FPaintOptions) and
