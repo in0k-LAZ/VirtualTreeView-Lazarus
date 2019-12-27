@@ -18808,8 +18808,8 @@ begin
   KillTimer(Handle, StructureChangeTimer);
 
   {$ifdef Windows}
-  if not (csDesigning in ComponentState) and (toAcceptOLEDrop in FOptions.FMiscOptions) then
-    RevokeDragDrop(Handle);
+  if not (csDesigning in ComponentState) then
+      RevokeDragDrop(Handle);
   {$endif}
 
   // Clean up other stuff.
